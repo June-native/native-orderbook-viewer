@@ -1,11 +1,6 @@
 import { useEffect, useState } from 'react';
 import './Orderbook.css';
 
-interface OrderbookLevel {
-  amount: number;
-  price: number;
-}
-
 interface OrderbookEntry {
   base_symbol: string;
   quote_symbol: string;
@@ -140,10 +135,6 @@ const Orderbook = () => {
     return Array.from(pairs);
   };
 
-  const shouldFlipPrice = (baseSymbol: string) => {
-    return baseSymbol === 'USDT' || baseSymbol === 'USDC';
-  };
-
   if (loading) {
     return <div className="loading">Loading orderbook...</div>;
   }
@@ -155,8 +146,7 @@ const Orderbook = () => {
   const selectedData = getSelectedPairData();
   const bids = selectedData?.bidEntry?.levels || [];
   const asks = selectedData?.askEntry?.levels || [];
-  const baseSymbol = selectedData?.bidEntry?.base_symbol;
-  const shouldFlip = baseSymbol ? shouldFlipPrice(baseSymbol) : false;
+  
 
   return (
     <div className="orderbook">
