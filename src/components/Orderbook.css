@@ -57,7 +57,7 @@
 
 .asks h3, .bids h3 {
   color: #333;
-  margin-bottom: 15px;
+  margin-bottom: -5px;
   text-align: center;
 }
 
@@ -94,6 +94,11 @@
   color: #666;
   text-align: right;
   margin-right: 20px;
+}
+
+.bid-ask-label {
+  color: #666;
+  font-size: 12px;
 }
 
 .loading, .error {

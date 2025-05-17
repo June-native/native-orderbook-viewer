@@ -146,7 +146,6 @@ const Orderbook = () => {
   const selectedData = getSelectedPairData();
   const bids = selectedData?.bidEntry?.levels || [];
   const asks = selectedData?.askEntry?.levels || [];
-  
 
   return (
     <div className="orderbook">
@@ -190,7 +189,8 @@ const Orderbook = () => {
       </div>
       <div className="orderbook-container">
         <div className="asks">
-          <h3>Asks</h3>
+          <h3>{selectedPair?.split('/')[1] || ''} -&gt; {selectedPair?.split('/')[0] || ''}</h3>
+          <span className="bid-ask-label">Bids</span>
           <div className="header">
             <span>Amount</span>
             <span>Price</span>
@@ -207,7 +207,8 @@ const Orderbook = () => {
           )}
         </div>
         <div className="bids">
-          <h3>Bids</h3>
+          <h3>{selectedPair?.split('/')[0] || ''} -&gt; {selectedPair?.split('/')[1] || ''}</h3>
+          <span className="bid-ask-label">Asks</span>
           <div className="header">
             <span>Amount</span>
             <span>Price</span>
