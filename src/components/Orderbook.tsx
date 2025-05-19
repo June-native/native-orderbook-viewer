@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import './Orderbook.css';
 
 interface OrderbookEntry {
@@ -20,6 +20,8 @@ const Orderbook = () => {
   const [selectedChain, setSelectedChain] = useState<Chain>('bsc');
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [isAutoUpdate, setIsAutoUpdate] = useState(true);
+  const [isMerged, setIsMerged] = useState(false);
+  const orderbookRef = useRef<HTMLDivElement>(null);
 
   const fetchOrderbook = async () => {
     try {
@@ -135,6 +137,21 @@ const Orderbook = () => {
     return Array.from(pairs);
   };
 
+  const scrollToMiddle = () => {
+    if (orderbookRef.current) {
+      const container = orderbookRef.current;
+      const scrollHeight = container.scrollHeight;
+      container.scrollTop = (scrollHeight - container.clientHeight) / 2;
+    }
+  };
+
+  // Effect to scroll to middle after data updates
+  useEffect(() => {
+    if (isMerged) {
+      scrollToMiddle();
+    }
+  }, [orderbookData, isMerged]);
+
   if (loading) {
     return <div className="loading">Loading orderbook...</div>;
   }
@@ -186,45 +203,105 @@ const Orderbook = () => {
             Update Now
           </button>
         )}
+        <label className="merge-toggle">
+          <input
+            type="checkbox"
+            checked={isMerged}
+            onChange={(e) => setIsMerged(e.target.checked)}
+          />
+          Merge View
+        </label>
       </div>
-      <div className="orderbook-container">
-        <div className="asks">
-          <h3>{selectedPair?.split('/')[1] || ''} -&gt; {selectedPair?.split('/')[0] || ''}</h3>
-          <span className="bid-ask-label">Bids</span>
-          <div className="header">
-            <span>Amount</span>
-            <span>Price</span>
+      {isMerged ? (
+        <div className="orderbook-container merged" ref={orderbookRef}>
+          <div className="merged-orders">
+            <div className="header">
+              <span>Price</span>
+              <span>Amount</span>
+              <span>Total</span>
+            </div>
+            {asks.length > 0 || bids.length > 0 ? (
+              <>
+                {[...asks].reverse().map(([amount, price], index) => {
+                  const displayPrice = 1 / price;
+                  const displayAmount = amount * price;
+                  const total = displayAmount * displayPrice;
+                  return (
+                    <div key={`ask-${index}`} className="level ask">
+                      <span className="price">{formatNumber(displayPrice)}</span>
+                      <span className="amount">{formatNumber(displayAmount)}</span>
+                      <span className="total">{formatNumber(total)}</span>
+                    </div>
+                  );
+                })}
+                {bids.map(([amount, price], index) => {
+                  const total = amount * price;
+                  return (
+                    <div key={`bid-${index}`} className="level bid">
+                      <span className="price">{formatNumber(price)}</span>
+                      <span className="amount">{formatNumber(amount)}</span>
+                      <span className="total">{formatNumber(total)}</span>
+                    </div>
+                  );
+                })}
+              </>
+            ) : (
+              <div className="no-data">No data available</div>
+            )}
           </div>
-          {asks.length > 0 ? (
-            asks.map(([amount, price], index) => (
-              <div key={index} className="level ask">
-                <span className="amount">{formatNumber(amount * price)}</span>
-                <span className="price">{formatNumber(1 / price)}</span>
-              </div>
-            ))
-          ) : (
-            <div className="no-data">No data available</div>
-          )}
         </div>
-        <div className="bids">
-          <h3>{selectedPair?.split('/')[0] || ''} -&gt; {selectedPair?.split('/')[1] || ''}</h3>
-          <span className="bid-ask-label">Asks</span>
-          <div className="header">
-            <span>Amount</span>
-            <span>Price</span>
+      ) : (
+        <div className="orderbook-container">
+          <div className="asks">
+            <h3>{selectedPair?.split('/')[1] || ''} -&gt; {selectedPair?.split('/')[0] || ''}</h3>
+            <span className="bid-ask-label">Asks</span>
+            <div className="header">
+              <span>Price</span>
+              <span>Amount</span>
+              <span>Total</span>
+            </div>
+            {asks.length > 0 ? (
+              asks.map(([amount, price], index) => {
+                const displayPrice = 1 / price;
+                const displayAmount = amount * price;
+                const total = displayAmount * displayPrice;
+                return (
+                  <div key={index} className="level ask">
+                    <span className="price">{formatNumber(displayPrice)}</span>
+                    <span className="amount">{formatNumber(displayAmount)}</span>
+                    <span className="total">{formatNumber(total)}</span>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="no-data">No data available</div>
+            )}
           </div>
-          {bids.length > 0 ? (
-            bids.map(([amount, price], index) => (
-              <div key={index} className="level bid">
-                <span className="amount">{formatNumber(amount)}</span>
-                <span className="price">{formatNumber(price)}</span>
-              </div>
-            ))
-          ) : (
-            <div className="no-data">No data available</div>
-          )}
+          <div className="bids">
+            <h3>{selectedPair?.split('/')[0] || ''} -&gt; {selectedPair?.split('/')[1] || ''}</h3>
+            <span className="bid-ask-label">Bids</span>
+            <div className="header">
+              <span>Price</span>
+              <span>Amount</span>
+              <span>Total</span>
+            </div>
+            {bids.length > 0 ? (
+              bids.map(([amount, price], index) => {
+                const total = amount * price;
+                return (
+                  <div key={index} className="level bid">
+                    <span className="price">{formatNumber(price)}</span>
+                    <span className="amount">{formatNumber(amount)}</span>
+                    <span className="total">{formatNumber(total)}</span>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="no-data">No data available</div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
       {lastUpdate && (
         <div className="last-update">
           Last updated: {lastUpdate.toLocaleTimeString()}
