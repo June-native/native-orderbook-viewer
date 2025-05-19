@@ -23,6 +23,14 @@ const Orderbook = () => {
   const [isMerged, setIsMerged] = useState(false);
   const orderbookRef = useRef<HTMLDivElement>(null);
 
+  // Update page title when chain or pair changes
+  useEffect(() => {
+    const title = selectedPair 
+      ? `${selectedChain.toUpperCase()} - ${selectedPair}`
+      : `${selectedChain.toUpperCase()}`;
+    document.title = title;
+  }, [selectedChain, selectedPair]);
+
   const fetchOrderbook = async () => {
     try {
       const response = await fetch(`https://v2.api.native.org/swap-api-v2/v1/orderbook?chain=${selectedChain}`, {
