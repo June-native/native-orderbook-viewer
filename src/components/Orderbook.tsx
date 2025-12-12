@@ -12,6 +12,22 @@ interface OrderbookEntry {
 
 type Chain = 'ethereum' | 'bsc' | 'arbitrum' | 'base';
 
+// Chain ID to chain name mapping
+const CHAIN_ID_MAP: Record<string, Chain> = {
+  '1': 'ethereum',
+  '56': 'bsc',
+  '42161': 'arbitrum',
+  '8453': 'base',
+};
+
+// Chain name to chain ID mapping
+const CHAIN_TO_ID_MAP: Record<Chain, string> = {
+  'ethereum': '1',
+  'bsc': '56',
+  'arbitrum': '42161',
+  'base': '8453',
+};
+
 // API key from environment variable
 const API_KEY = import.meta.env.VITE_API_KEY || '';
 
@@ -23,9 +39,13 @@ const Orderbook = () => {
   const [selectedChain, setSelectedChain] = useState<Chain>('ethereum');
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [isAutoUpdate, setIsAutoUpdate] = useState(true);
+  const [forceInit, setForceInit] = useState(0); // Force effect to run on mount
   const [tooltip, setTooltip] = useState<{ x: number; y: number; price: number; cumulative: number; side: 'bid' | 'ask' } | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const isInitialMount = useRef(true);
+  const urlPairFromParams = useRef<string | null>(null);
+  const isInitializing = useRef(false);
+  const isInitializingInProgress = useRef(false);
 
   // Helper to encode pair for URL (replace / with -)
   const encodePair = (pair: string | null): string | null => {
@@ -39,31 +59,81 @@ const Orderbook = () => {
     return pair.replace(/-/g, '/');
   };
 
+  // Helper to normalize chain (convert chainID to chain name, or return chain name if valid)
+  const normalizeChain = (chain: string | null): Chain | null => {
+    if (!chain) return null;
+    
+    // Check if it's a chain ID
+    if (CHAIN_ID_MAP[chain]) {
+      return CHAIN_ID_MAP[chain];
+    }
+    
+    // Check if it's a valid chain name
+    if (['ethereum', 'bsc', 'arbitrum', 'base'].includes(chain)) {
+      return chain as Chain;
+    }
+    
+    return null;
+  };
+
+  // Helper to check if a pair matches (including reversed pairs)
+  const findMatchingPair = (urlPair: string, availablePairs: string[]): string | null => {
+    const urlPairLower = urlPair.toLowerCase();
+    
+    // First, try exact match (case-insensitive)
+    const exactMatch = availablePairs.find(p => p.toLowerCase() === urlPairLower);
+    if (exactMatch) return exactMatch;
+    
+    // Then, try reversed pair match
+    const [base, quote] = urlPairLower.split('/');
+    if (base && quote) {
+      const reversedPair = `${quote}/${base}`;
+      const reversedMatch = availablePairs.find(p => p.toLowerCase() === reversedPair);
+      if (reversedMatch) return reversedMatch;
+    }
+    
+    return null;
+  };
+
   // Read URL parameters on initial load (runs once on mount)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const urlChain = params.get('chain') as Chain | null;
+    const urlChainParam = params.get('chain');
     const urlPairEncoded = params.get('pair');
     const urlPair = decodePair(urlPairEncoded);
     
-    if (urlChain && ['ethereum', 'bsc', 'arbitrum', 'base'].includes(urlChain)) {
-      setSelectedChain(urlChain);
-    }
+    // Set initialization flag FIRST, before any state changes
+    isInitializing.current = true;
+    
+    // Store URL pair in ref (synchronous, so it's available immediately)
     if (urlPair) {
-      setSelectedPair(urlPair);
+      urlPairFromParams.current = urlPair;
     }
-    isInitialMount.current = false;
+    
+    // Normalize chain (accept chainID or chain name)
+    const normalizedChain = normalizeChain(urlChainParam);
+    const chainToSet = normalizedChain || 'ethereum';
+    
+    // Always set chain, and force initialization if chain matches default
+    setSelectedChain(chainToSet);
+    
+    // If chain matches default, force the effect to run by updating forceInit
+    if (chainToSet === selectedChain) {
+      setForceInit(prev => prev + 1);
+    }
+    
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Only run once on mount
 
-  // Update URL when chain or pair changes (but not on initial mount)
+  // Update URL when chain or pair changes (but not during initialization)
   useEffect(() => {
-    if (isInitialMount.current) return;
+    if (isInitialMount.current || isInitializing.current) return;
     
     const params = new URLSearchParams(window.location.search);
     
     if (selectedChain) {
-      params.set('chain', selectedChain);
+      // Use chain ID in URL instead of chain name
+      params.set('chain', CHAIN_TO_ID_MAP[selectedChain]);
     } else {
       params.delete('chain');
     }
@@ -122,6 +192,13 @@ const Orderbook = () => {
   // Effect for initial pair selection and chain changes
   useEffect(() => {
     const initializePairs = async () => {
+      // Prevent concurrent initialization runs (React strict mode causes double renders)
+      if (isInitializingInProgress.current) {
+        return;
+      }
+      
+      isInitializingInProgress.current = true;
+      
       try {
         // Use Vercel proxy endpoint (or fallback to direct API in development)
         const apiUrl = import.meta.env.PROD 
@@ -141,7 +218,7 @@ const Orderbook = () => {
         const data = await response.json();
         setOrderbookData(data);
         
-        // Get available pairs
+        // Get available pairs from the FIRST orderbook return
         const availablePairs = new Set<string>();
         data.forEach((entry: OrderbookEntry) => {
           if (entry.side === 'bid') {
@@ -150,27 +227,62 @@ const Orderbook = () => {
         });
         const pairsArray = Array.from(availablePairs);
         
-        // Check if current pair exists, if not, use first pair or default
-        if (selectedPair && pairsArray.includes(selectedPair)) {
-          // Pair exists, keep it
+        // Check URL pair ONLY if we're still initializing (first load)
+        // This ensures we only validate against the first orderbook return
+        const urlPair = isInitializing.current ? urlPairFromParams.current : null;
+        
+        if (urlPair) {
+          // We have a URL pair from initial load - validate it against first orderbook return
+          // Check for exact match or reversed pair match
+          const matchingPair = findMatchingPair(urlPair, pairsArray);
+          
+          if (matchingPair) {
+            // URL pair EXISTS in first orderbook return (or reversed) - use it (use the exact case from orderbook)
+            setSelectedPair(matchingPair);
+            urlPairFromParams.current = null; // Clear after successfully using
+          } else {
+            // URL pair NOT FOUND in first orderbook return - default to first available pair
+            if (pairsArray.length > 0) {
+              setSelectedPair(pairsArray[0]);
+            } else {
+              setSelectedPair(null);
+            }
+            urlPairFromParams.current = null; // Clear invalid URL pair
+          }
+        } else if (selectedPair && pairsArray.includes(selectedPair)) {
+          // Current selectedPair exists and is valid, keep it (don't change)
+          // This handles chain changes after initial load
         } else if (pairsArray.length > 0) {
-          // Pair doesn't exist or not set, use first available pair
+          // No URL pair and no valid selectedPair, use first available pair
           setSelectedPair(pairsArray[0]);
         } else {
           setSelectedPair(null);
         }
         
+        // Mark initialization as complete only after first orderbook fetch
+        if (isInitializing.current) {
+          isInitializing.current = false;
+          isInitialMount.current = false;
+        }
+        
         setError(null);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'An error occurred');
-        setSelectedPair(null);
+        // Only clear pair on error if we're initializing
+        if (isInitializing.current) {
+          setSelectedPair(null);
+          urlPairFromParams.current = null;
+          isInitializing.current = false;
+          isInitialMount.current = false;
+        }
       } finally {
+        isInitializingInProgress.current = false;
         setLoading(false);
       }
     };
 
     initializePairs();
-  }, [selectedChain]); // Only run when chain changes
+  }, [selectedChain, forceInit]); // Run when chain changes OR forceInit changes (on mount)
 
   // Effect for auto-refresh
   useEffect(() => {
