@@ -20,11 +20,68 @@ const Orderbook = () => {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedPair, setSelectedPair] = useState<string | null>(null);
-  const [selectedChain, setSelectedChain] = useState<Chain>('bsc');
+  const [selectedChain, setSelectedChain] = useState<Chain>('ethereum');
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [isAutoUpdate, setIsAutoUpdate] = useState(true);
   const [tooltip, setTooltip] = useState<{ x: number; y: number; price: number; cumulative: number; side: 'bid' | 'ask' } | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+  const isInitialMount = useRef(true);
+
+  // Helper to encode pair for URL (replace / with -)
+  const encodePair = (pair: string | null): string | null => {
+    if (!pair) return null;
+    return pair.replace(/\//g, '-');
+  };
+
+  // Helper to decode pair from URL (replace - with /)
+  const decodePair = (pair: string | null): string | null => {
+    if (!pair) return null;
+    return pair.replace(/-/g, '/');
+  };
+
+  // Read URL parameters on initial load (runs once on mount)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const urlChain = params.get('chain') as Chain | null;
+    const urlPairEncoded = params.get('pair');
+    const urlPair = decodePair(urlPairEncoded);
+    
+    if (urlChain && ['ethereum', 'bsc', 'arbitrum', 'base'].includes(urlChain)) {
+      setSelectedChain(urlChain);
+    }
+    if (urlPair) {
+      setSelectedPair(urlPair);
+    }
+    isInitialMount.current = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run once on mount
+
+  // Update URL when chain or pair changes (but not on initial mount)
+  useEffect(() => {
+    if (isInitialMount.current) return;
+    
+    const params = new URLSearchParams(window.location.search);
+    
+    if (selectedChain) {
+      params.set('chain', selectedChain);
+    } else {
+      params.delete('chain');
+    }
+    
+    if (selectedPair) {
+      const encodedPair = encodePair(selectedPair);
+      if (encodedPair) {
+        params.set('pair', encodedPair);
+      } else {
+        params.delete('pair');
+      }
+    } else {
+      params.delete('pair');
+    }
+    
+    const newUrl = `${window.location.pathname}${params.toString() ? '?' + params.toString() : ''}`;
+    window.history.replaceState({}, '', newUrl);
+  }, [selectedChain, selectedPair]);
 
   // Update page title when chain or pair changes
   useEffect(() => {
@@ -84,10 +141,21 @@ const Orderbook = () => {
         const data = await response.json();
         setOrderbookData(data);
         
-        // Always set to first pair when chain changes
-        if (data.length > 0) {
-          const firstEntry = data[0];
-          setSelectedPair(`${firstEntry.base_symbol}/${firstEntry.quote_symbol}`);
+        // Get available pairs
+        const availablePairs = new Set<string>();
+        data.forEach((entry: OrderbookEntry) => {
+          if (entry.side === 'bid') {
+            availablePairs.add(`${entry.base_symbol}/${entry.quote_symbol}`);
+          }
+        });
+        const pairsArray = Array.from(availablePairs);
+        
+        // Check if current pair exists, if not, use first pair or default
+        if (selectedPair && pairsArray.includes(selectedPair)) {
+          // Pair exists, keep it
+        } else if (pairsArray.length > 0) {
+          // Pair doesn't exist or not set, use first available pair
+          setSelectedPair(pairsArray[0]);
         } else {
           setSelectedPair(null);
         }
@@ -612,10 +680,10 @@ const Orderbook = () => {
                   <div><strong>Price:</strong> {formatNumber(tooltip.price)}</div>
                   <div><strong>Cumulative:</strong> {formatNumber(tooltip.cumulative)}</div>
                   <div><strong>Side:</strong> <span className={tooltip.side === 'bid' ? 'bid' : 'ask'}>{tooltip.side === 'bid' ? 'Bid' : 'Ask'}</span></div>
-                </div>
+          </div>
               </div>
-            )}
-            </div>
+          )}
+        </div>
           </div>
         )}
         <div className="orderbook-container merged">
@@ -668,16 +736,16 @@ const Orderbook = () => {
                     return (
                       <div key={`bid-${index}`} className="level bid">
                         <span className="price">{formatNumber(price)}</span>
-                        <span className="amount">{formatNumber(amount)}</span>
+                <span className="amount">{formatNumber(amount)}</span>
                         <span className="total">{formatNumber(total)}</span>
                       </div>
                     );
                   })}
-                </div>
+              </div>
               </>
-            ) : (
-              <div className="no-data">No data available</div>
-            )}
+          ) : (
+            <div className="no-data">No data available</div>
+          )}
           </div>
         </div>
       </div>
