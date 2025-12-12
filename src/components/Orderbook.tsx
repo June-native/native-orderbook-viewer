@@ -270,7 +270,7 @@ const Orderbook = () => {
         setError(err instanceof Error ? err.message : 'An error occurred');
         // Only clear pair on error if we're initializing
         if (isInitializing.current) {
-          setSelectedPair(null);
+        setSelectedPair(null);
           urlPairFromParams.current = null;
           isInitializing.current = false;
           isInitialMount.current = false;
@@ -288,7 +288,7 @@ const Orderbook = () => {
   useEffect(() => {
     if (!isAutoUpdate) return;
 
-    const interval = setInterval(fetchOrderbook, 2000);
+    const interval = setInterval(fetchOrderbook, 30000);
     return () => clearInterval(interval);
   }, [selectedChain, isAutoUpdate]); // Add isAutoUpdate as dependency
 
@@ -569,6 +569,58 @@ const Orderbook = () => {
                   }
                 }}
                 onMouseLeave={() => setTooltip(null)}
+                onTouchMove={(e) => {
+                  if (!svgRef.current || !depthData) return;
+                  const touch = e.touches[0];
+                  if (!touch) return;
+                  const rect = svgRef.current.getBoundingClientRect();
+                  const svgX = ((touch.clientX - rect.left) / rect.width) * 400;
+                  const svgY = ((touch.clientY - rect.top) / rect.height) * 300;
+                  
+                  if (svgX >= depthData.leftPadding && svgX <= 400 - depthData.rightPadding && svgY >= 20 && svgY <= 280) {
+                    // Find closest data point
+                    type TooltipData = { price: number; cumulative: number; side: 'bid' | 'ask' };
+                    let closestData: TooltipData | null = null;
+                    let minDist = Infinity;
+                    
+                    // Check bids
+                    for (const d of depthData.bidData) {
+                      const x = depthData.leftPadding + ((d.price - depthData.minPrice) / depthData.priceRange) * depthData.chartWidth;
+                      const y = 280 - (d.cumulative / depthData.maxCumulative) * 260;
+                      const dist = Math.sqrt(Math.pow(svgX - x, 2) + Math.pow(svgY - y, 2));
+                      if (dist < minDist && dist < 30) {
+                        minDist = dist;
+                        closestData = { price: d.price, cumulative: d.cumulative, side: 'bid' };
+                      }
+                    }
+                    
+                    // Check asks
+                    for (const d of depthData.askData) {
+                      const x = depthData.leftPadding + ((d.price - depthData.minPrice) / depthData.priceRange) * depthData.chartWidth;
+                      const y = 280 - (d.cumulative / depthData.maxCumulative) * 260;
+                      const dist = Math.sqrt(Math.pow(svgX - x, 2) + Math.pow(svgY - y, 2));
+                      if (dist < minDist && dist < 30) {
+                        minDist = dist;
+                        closestData = { price: d.price, cumulative: d.cumulative, side: 'ask' };
+                      }
+                    }
+                    
+                    if (closestData) {
+                      setTooltip({
+                        x: touch.clientX - rect.left,
+                        y: touch.clientY - rect.top,
+                        price: closestData.price,
+                        cumulative: closestData.cumulative,
+                        side: closestData.side
+                      });
+                    } else {
+                      setTooltip(null);
+                    }
+                  } else {
+                    setTooltip(null);
+                  }
+                }}
+                onTouchEnd={() => setTooltip(null)}
               >
               <defs>
                 <linearGradient id="bidGradient" x1="0%" y1="0%" x2="0%" y2="100%">
