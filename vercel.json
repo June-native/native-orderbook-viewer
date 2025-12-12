@@ -1,0 +1,8 @@
+{
+  "functions": {
+    "api/orderbook.ts": {
+      "maxDuration": 10
+    }
+  }
+}
+

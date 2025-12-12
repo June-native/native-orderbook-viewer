@@ -36,11 +36,16 @@ const Orderbook = () => {
 
   const fetchOrderbook = async () => {
     try {
-      const response = await fetch(`https://v2.api.native.org/swap-api-v2/v1/orderbook?chain=${selectedChain}`, {
-        headers: {
-          'apiKey': API_KEY
-        }
-      });
+      // Use Vercel proxy endpoint (or fallback to direct API in development)
+      const apiUrl = import.meta.env.PROD 
+        ? `/api/orderbook?chain=${selectedChain}`
+        : `https://v2.api.native.org/swap-api-v2/v1/orderbook?chain=${selectedChain}`;
+      
+      const headers: HeadersInit = import.meta.env.PROD
+        ? {}
+        : { 'apiKey': API_KEY };
+      
+      const response = await fetch(apiUrl, { headers });
       
       if (!response.ok) {
         throw new Error('Failed to fetch orderbook data');
@@ -61,11 +66,16 @@ const Orderbook = () => {
   useEffect(() => {
     const initializePairs = async () => {
       try {
-        const response = await fetch(`https://v2.api.native.org/swap-api-v2/v1/orderbook?chain=${selectedChain}`, {
-          headers: {
-            'apiKey': API_KEY
-          }
-        });
+        // Use Vercel proxy endpoint (or fallback to direct API in development)
+        const apiUrl = import.meta.env.PROD 
+          ? `/api/orderbook?chain=${selectedChain}`
+          : `https://v2.api.native.org/swap-api-v2/v1/orderbook?chain=${selectedChain}`;
+        
+        const headers: HeadersInit = import.meta.env.PROD
+          ? {}
+          : { 'apiKey': API_KEY };
+        
+        const response = await fetch(apiUrl, { headers });
         
         if (!response.ok) {
           throw new Error('Failed to fetch orderbook data');
