@@ -10,7 +10,8 @@ interface OrderbookEntry {
 }
 
 /**
- * Compress levels based on price impact percentages (0.05%, 0.5%, 2%)
+ * Compress levels based on price impact percentages
+ * Final results: < 0.1%, < 1%, >= 1%
  * Price impact is calculated relative to mid price
  */
 function compressLevelsByPriceImpact(
@@ -27,46 +28,63 @@ function compressLevelsByPriceImpact(
     return levels;
   }
 
-  // Price impact percentages: 0.05%, 0.5%, 2%
-  const priceImpacts = [0.0005, 0.005, 0.02];
+  // Three buckets: < 0.1%, < 1%, >= 1%
+  const thresholds = [0.001, 0.01]; // 0.1%, 1%
   
+  // Initialize accumulators for each bucket
+  const buckets: Array<{ amount: number; sum: number }> = [
+    { amount: 0, sum: 0 }, // < 0.1%
+    { amount: 0, sum: 0 }, // >= 0.1% and < 1%
+    { amount: 0, sum: 0 }  // >= 1%
+  ];
+
+  // Loop through original levels
+  for (const [amount, price] of levels) {
+    // Calculate price impact
+    let priceImpact: number;
+    if (side === 'bid') {
+      // For bids: impact is positive when price < mid (we're buying below mid)
+      priceImpact = (midPrice - price) / midPrice;
+    } else {
+      // For asks: impact is positive when price > mid (we're selling above mid)
+      priceImpact = (price - midPrice) / midPrice;
+    }
+
+    // Determine which bucket this level belongs to
+    if (priceImpact < thresholds[0]) {
+      // < 0.1%
+      buckets[0].amount += amount;
+      buckets[0].sum += price * amount;
+    } else if (priceImpact < thresholds[1]) {
+      // >= 0.1% and < 1%
+      buckets[1].amount += amount;
+      buckets[1].sum += price * amount;
+    } else {
+      // >= 1%
+      buckets[2].amount += amount;
+      buckets[2].sum += price * amount;
+    }
+  }
+
+  // Build compressed levels from buckets
   const compressed: [number, number][] = [];
 
-  for (const impact of priceImpacts) {
-    let accumulatedAmount = 0;
-    let accumulatedSum = 0; // sum of (amount * price)
-    let hasLevels = false;
+  // Bucket 1: < 0.1%
+  if (buckets[0].amount > 0) {
+    const compressedPrice = buckets[0].sum / buckets[0].amount;
+    compressed.push([buckets[0].amount, compressedPrice]);
+  }
 
-    // Calculate target price based on side
-    let targetPrice: number;
-    if (side === 'bid') {
-      // For bids: price should be below mid (negative impact)
-      targetPrice = midPrice * (1 - impact);
-    } else {
-      // For asks: price should be above mid (positive impact)
-      targetPrice = midPrice * (1 + impact);
-    }
+  // Bucket 2: >= 0.1% and < 1%
+  if (buckets[1].amount > 0) {
+    const compressedPrice = buckets[1].sum / buckets[1].amount;
+    compressed.push([buckets[1].amount, compressedPrice]);
+  }
 
-    // Find all levels within the price impact range
-    // For bids: prices <= targetPrice (prices below or equal to target)
-    // For asks: prices >= targetPrice (prices above or equal to target)
-    for (const [amount, price] of levels) {
-      const isInRange = side === 'bid' 
-        ? price <= targetPrice && price > midPrice * (1 - impact * 2) // Prevent overlap with larger impacts
-        : price >= targetPrice && price < midPrice * (1 + impact * 2); // Prevent overlap with larger impacts
-      
-      if (isInRange) {
-        accumulatedAmount += amount;
-        accumulatedSum += price * amount;
-        hasLevels = true;
-      }
-    }
-
-    // Only add if we found levels in this range
-    if (hasLevels && accumulatedAmount > 0) {
-      const compressedPrice = accumulatedSum / accumulatedAmount;
-      compressed.push([accumulatedAmount, compressedPrice]);
-    }
+  // Bucket 3: >= 1%
+  if (buckets[2].amount > 0) {
+    const compressedPrice = buckets[2].sum / buckets[2].amount;
+    compressed.push([buckets[2].amount, compressedPrice]);
   }
 
   return compressed;
