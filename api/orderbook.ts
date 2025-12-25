@@ -10,68 +10,57 @@ interface OrderbookEntry {
 }
 
 /**
- * Compress orderbook levels according to obfuscation rules:
- * - 1 level: return as is
- * - 2-5 levels: compress to 2 levels
- * - >5 levels: compress to 3 levels
+ * Compress levels based on price impact percentages (0.1%, 0.5%, 2%)
+ * Price impact is calculated relative to mid price
  */
-function compressLevels(levels: [number, number][]): [number, number][] {
+function compressLevelsByPriceImpact(
+  levels: [number, number][],
+  midPrice: number,
+  side: 'bid' | 'ask'
+): [number, number][] {
   if (levels.length === 0) {
     return [];
   }
 
-  // 1 level: return as is
-  if (levels.length === 1) {
-    return levels;
-  }
-
-  // Determine target level count
-  let targetCount: number;
-  if (levels.length >= 2 && levels.length <= 5) {
-    targetCount = 2;
-  } else {
-    targetCount = 3;
-  }
-
-  // If already at or below target, return as is
-  if (levels.length <= targetCount) {
-    return levels;
-  }
-
-  // Calculate how many original levels per compressed level
-  const levelsPerCompressed = levels.length / targetCount;
-
+  // Price impact percentages: 0.1%, 0.5%, 2%
+  const priceImpacts = [0.001, 0.005, 0.02];
+  
   const compressed: [number, number][] = [];
-  let accumulatedAmount = 0;
-  let accumulatedSum = 0; // sum of (amount * price)
-  let levelCount = 0; // count of original levels in current group
 
-  // Loop through original levels from top to bottom
-  for (let i = 0; i < levels.length; i++) {
-    const [amount, price] = levels[i];
-    
-    // Accumulate amount and sum (amount * price)
-    accumulatedAmount += amount;
-    accumulatedSum += price * amount;
-    levelCount++;
-    
-    // Check if we've accumulated enough levels (or this is the last level)
-    const shouldCreateLevel = levelCount >= levelsPerCompressed - 1e-10 || i === levels.length - 1;
-    
-    if (shouldCreateLevel) {
-      // Generate compressed level: price = accumulatedSum / accumulatedAmount, amount = accumulatedAmount
-      const compressedPrice = accumulatedAmount > 0 ? accumulatedSum / accumulatedAmount : price;
-      compressed.push([accumulatedAmount, compressedPrice]);
+  for (const impact of priceImpacts) {
+    let accumulatedAmount = 0;
+    let accumulatedSum = 0; // sum of (amount * price)
+    let hasLevels = false;
+
+    // Calculate target price based on side
+    let targetPrice: number;
+    if (side === 'bid') {
+      // For bids: price should be below mid (negative impact)
+      targetPrice = midPrice * (1 - impact);
+    } else {
+      // For asks: price should be above mid (positive impact)
+      targetPrice = midPrice * (1 + impact);
+    }
+
+    // Find all levels within the price impact range
+    // For bids: prices <= targetPrice (prices below or equal to target)
+    // For asks: prices >= targetPrice (prices above or equal to target)
+    for (const [amount, price] of levels) {
+      const isInRange = side === 'bid' 
+        ? price <= targetPrice && price > midPrice * (1 - impact * 2) // Prevent overlap with larger impacts
+        : price >= targetPrice && price < midPrice * (1 + impact * 2); // Prevent overlap with larger impacts
       
-      // Reset for next compressed level
-      accumulatedAmount = 0;
-      accumulatedSum = 0;
-      levelCount = 0;
-      
-      // Stop if we've reached the target count
-      if (compressed.length >= targetCount) {
-        break;
+      if (isInRange) {
+        accumulatedAmount += amount;
+        accumulatedSum += price * amount;
+        hasLevels = true;
       }
+    }
+
+    // Only add if we found levels in this range
+    if (hasLevels && accumulatedAmount > 0) {
+      const compressedPrice = accumulatedSum / accumulatedAmount;
+      compressed.push([accumulatedAmount, compressedPrice]);
     }
   }
 
@@ -79,13 +68,80 @@ function compressLevels(levels: [number, number][]): [number, number][] {
 }
 
 /**
- * Reshape orderbook data by compressing levels for each entry
+ * Calculate mid price from best bid and best ask
+ * If there's no other side, use the first level's price as mid price
+ */
+function calculateMidPrice(bidEntry: OrderbookEntry | null, askEntry: OrderbookEntry | null, currentEntry: OrderbookEntry): number | null {
+  // If both sides exist, calculate mid price from best bid and best ask
+  if (bidEntry && askEntry && bidEntry.levels.length > 0 && askEntry.levels.length > 0) {
+    // Best bid is the highest price (first level for bids, typically sorted descending)
+    const bestBid = bidEntry.levels[0][1];
+    
+    // Best ask is the lowest price (first level for asks, typically sorted ascending)
+    const bestAsk = askEntry.levels[0][1];
+
+    return (bestBid + bestAsk) / 2;
+  }
+
+  // If there's no other side, use the first level's price as mid price
+  if (currentEntry.levels.length > 0) {
+    return currentEntry.levels[0][1];
+  }
+
+  return null;
+}
+
+/**
+ * Reshape orderbook data by compressing levels based on price impact
  */
 function reshapeOrderbook(data: OrderbookEntry[]): OrderbookEntry[] {
-  return data.map(entry => ({
-    ...entry,
-    levels: compressLevels(entry.levels)
-  }));
+  // Group entries by pair (base_symbol/quote_symbol and addresses)
+  const pairMap = new Map<string, { bid: OrderbookEntry | null; ask: OrderbookEntry | null }>();
+
+  // First pass: group entries by pair
+  for (const entry of data) {
+    const pairKey = `${entry.base_symbol}/${entry.quote_symbol}:${entry.base_address}/${entry.quote_address}`;
+    
+    if (!pairMap.has(pairKey)) {
+      pairMap.set(pairKey, { bid: null, ask: null });
+    }
+    
+    const pair = pairMap.get(pairKey)!;
+    if (entry.side === 'bid') {
+      pair.bid = entry;
+    } else {
+      pair.ask = entry;
+    }
+  }
+
+  // Second pass: compress levels for each entry based on mid price
+  const result: OrderbookEntry[] = [];
+
+  for (const entry of data) {
+    const pairKey = `${entry.base_symbol}/${entry.quote_symbol}:${entry.base_address}/${entry.quote_address}`;
+    const pair = pairMap.get(pairKey);
+    
+    if (!pair) continue;
+
+    // Calculate mid price
+    const midPrice = calculateMidPrice(pair.bid, pair.ask, entry);
+    
+    if (midPrice === null) {
+      // If we can't calculate mid price, return original levels
+      result.push(entry);
+      continue;
+    }
+
+    // Compress levels based on price impact
+    const compressedLevels = compressLevelsByPriceImpact(entry.levels, midPrice, entry.side);
+    
+    result.push({
+      ...entry,
+      levels: compressedLevels
+    });
+  }
+
+  return result;
 }
 
 export default async function handler(
