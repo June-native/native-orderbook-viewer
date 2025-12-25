@@ -10,7 +10,7 @@ interface OrderbookEntry {
 }
 
 /**
- * Compress levels based on price impact percentages (0.05%, 0.5%, 2%)
+ * Compress levels based on price impact percentages (0.1%, 0.5%, 2%)
  * Price impact is calculated relative to mid price
  */
 function compressLevelsByPriceImpact(
@@ -22,13 +22,8 @@ function compressLevelsByPriceImpact(
     return [];
   }
 
-  // If there's only one original level, return as is
-  if (levels.length === 1) {
-    return levels;
-  }
-
-  // Price impact percentages: 0.05%, 0.5%, 2%
-  const priceImpacts = [0.0005, 0.005, 0.02];
+  // Price impact percentages: 0.1%, 0.5%, 2%
+  const priceImpacts = [0.001, 0.005, 0.02];
   
   const compressed: [number, number][] = [];
 
