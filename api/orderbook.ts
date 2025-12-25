@@ -45,72 +45,38 @@ function compressLevels(levels: [number, number][]): [number, number][] {
   const amountPerLevel = totalAmount / targetCount;
 
   const compressed: [number, number][] = [];
-  let levelIndex = 0;
   let accumulatedAmount = 0;
-  let weightedPriceSum = 0;
+  let accumulatedSum = 0; // sum of (amount * price)
 
-  for (let i = 0; i < levels.length && levelIndex < targetCount; i++) {
+  // Loop through original levels from top to bottom
+  for (let i = 0; i < levels.length; i++) {
     const [price, amount] = levels[i];
-    const remainingForCurrentLevel = amountPerLevel - accumulatedAmount;
     
-    if (amount <= remainingForCurrentLevel) {
-      // This level fits entirely in the current bucket
-      weightedPriceSum += price * amount;
-      accumulatedAmount += amount;
+    // Accumulate amount and sum (amount * price)
+    accumulatedAmount += amount;
+    accumulatedSum += price * amount;
+    
+    // Check if accumulated amount exceeds the threshold
+    if (accumulatedAmount >= amountPerLevel - 1e-10) {
+      // Generate compressed level: price = accumulatedSum / accumulatedAmount, amount = accumulatedAmount
+      const compressedPrice = accumulatedAmount > 0 ? accumulatedSum / accumulatedAmount : price;
+      compressed.push([compressedPrice, accumulatedAmount]);
       
-      // Check if we've reached the threshold (or this is the last level)
-      if (accumulatedAmount >= amountPerLevel - 1e-10 || i === levels.length - 1) {
-        const avgPrice = accumulatedAmount > 0 ? weightedPriceSum / accumulatedAmount : price;
-        compressed.push([avgPrice, accumulatedAmount]);
-        
-        // Reset for next level
-        accumulatedAmount = 0;
-        weightedPriceSum = 0;
-        levelIndex++;
-      }
-    } else {
-      // This level spans multiple buckets
-      // First, complete the current bucket with part of this level
-      const amountForCurrentBucket = remainingForCurrentLevel;
-      weightedPriceSum += price * amountForCurrentBucket;
-      accumulatedAmount += amountForCurrentBucket;
-      
-      // Complete current bucket
-      const avgPrice = accumulatedAmount > 0 ? weightedPriceSum / accumulatedAmount : price;
-      compressed.push([avgPrice, accumulatedAmount]);
-      
-      // Reset for next level
-      let remainingAmount = amount - amountForCurrentBucket;
+      // Reset for next compressed level
       accumulatedAmount = 0;
-      weightedPriceSum = 0;
-      levelIndex++;
+      accumulatedSum = 0;
       
-      // Fill remaining buckets with the rest of this level
-      while (remainingAmount > 0 && levelIndex < targetCount) {
-        const amountForThisBucket = Math.min(remainingAmount, amountPerLevel);
-        weightedPriceSum += price * amountForThisBucket;
-        accumulatedAmount = amountForThisBucket;
-        remainingAmount -= amountForThisBucket;
-        
-        // Complete this bucket if we've reached the threshold or used all remaining amount
-        if (accumulatedAmount >= amountPerLevel - 1e-10 || remainingAmount === 0) {
-          const avgPrice = accumulatedAmount > 0 ? weightedPriceSum / accumulatedAmount : price;
-          compressed.push([avgPrice, accumulatedAmount]);
-          
-          if (levelIndex < targetCount - 1) {
-            accumulatedAmount = 0;
-            weightedPriceSum = 0;
-            levelIndex++;
-          }
-        }
+      // Stop if we've reached the target count
+      if (compressed.length >= targetCount) {
+        break;
       }
     }
   }
 
-  // Handle any remaining accumulated amount (shouldn't happen, but safety check)
+  // Handle any remaining accumulated amount (for the last level if we haven't reached target count)
   if (accumulatedAmount > 1e-10 && compressed.length < targetCount) {
-    const avgPrice = accumulatedAmount > 0 ? weightedPriceSum / accumulatedAmount : levels[levels.length - 1][0];
-    compressed.push([avgPrice, accumulatedAmount]);
+    const compressedPrice = accumulatedAmount > 0 ? accumulatedSum / accumulatedAmount : levels[levels.length - 1][0];
+    compressed.push([compressedPrice, accumulatedAmount]);
   }
 
   return compressed;
