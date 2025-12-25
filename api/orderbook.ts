@@ -38,45 +38,41 @@ function compressLevels(levels: [number, number][]): [number, number][] {
     return levels;
   }
 
-  // Sum all amounts
-  const totalAmount = levels.reduce((sum, [, amount]) => sum + amount, 0);
-  
-  // Calculate amount threshold per level
-  const amountPerLevel = totalAmount / targetCount;
+  // Calculate how many original levels per compressed level
+  const levelsPerCompressed = levels.length / targetCount;
 
   const compressed: [number, number][] = [];
   let accumulatedAmount = 0;
   let accumulatedSum = 0; // sum of (amount * price)
+  let levelCount = 0; // count of original levels in current group
 
   // Loop through original levels from top to bottom
   for (let i = 0; i < levels.length; i++) {
-    const [price, amount] = levels[i];
+    const [amount, price] = levels[i];
     
     // Accumulate amount and sum (amount * price)
     accumulatedAmount += amount;
     accumulatedSum += price * amount;
+    levelCount++;
     
-    // Check if accumulated amount exceeds the threshold
-    if (accumulatedAmount >= amountPerLevel - 1e-10) {
+    // Check if we've accumulated enough levels (or this is the last level)
+    const shouldCreateLevel = levelCount >= levelsPerCompressed - 1e-10 || i === levels.length - 1;
+    
+    if (shouldCreateLevel) {
       // Generate compressed level: price = accumulatedSum / accumulatedAmount, amount = accumulatedAmount
       const compressedPrice = accumulatedAmount > 0 ? accumulatedSum / accumulatedAmount : price;
-      compressed.push([compressedPrice, accumulatedAmount]);
+      compressed.push([accumulatedAmount, compressedPrice]);
       
       // Reset for next compressed level
       accumulatedAmount = 0;
       accumulatedSum = 0;
+      levelCount = 0;
       
       // Stop if we've reached the target count
       if (compressed.length >= targetCount) {
         break;
       }
     }
-  }
-
-  // Handle any remaining accumulated amount (for the last level if we haven't reached target count)
-  if (accumulatedAmount > 1e-10 && compressed.length < targetCount) {
-    const compressedPrice = accumulatedAmount > 0 ? accumulatedSum / accumulatedAmount : levels[levels.length - 1][0];
-    compressed.push([compressedPrice, accumulatedAmount]);
   }
 
   return compressed;
